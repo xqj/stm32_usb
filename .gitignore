@@ -3,3 +3,8 @@
 ################################################################################
 
 /.vs
+/android/.idea
+/stm32F103C8T6/usb_test/Drivers
+/stm32F103C8T6/usb_test/MDK-ARM/DebugConfig
+/stm32F103C8T6/usb_test/MDK-ARM/RTE/_usb_test
+/stm32F103C8T6/usb_test/Middlewares/ST/STM32_USB_Device_Library
