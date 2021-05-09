@@ -15,15 +15,19 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
     private Button btnSend;
+    private TextView textView;
     //USB管理器:负责管理USB设备的类
     private UsbManager manager;
     //stm32的USB设备
@@ -39,13 +43,18 @@ public class MainActivity extends AppCompatActivity {
     private byte[] sendBytes;
     //接收到的信息字节
     private byte[] receiveBytes;
+    //发送线程池
+    ExecutorService sendPool = Executors.newCachedThreadPool();
+     UsbSendThread usbSendThread=new UsbSendThread();
+    UsbRecevieThread usbRecevieThread=new UsbRecevieThread();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        btnSend=findViewById(R.id.btn_send);
-        ButtonClick buttonClick=new ButtonClick();
+        textView = findViewById(R.id.textView);
+        btnSend = findViewById(R.id.btn_send);
+        ButtonClick buttonClick = new ButtonClick();
         btnSend.setOnClickListener(buttonClick);
         // 获取USB设备
         manager = (UsbManager) getSystemService(Context.USB_SERVICE);
@@ -53,7 +62,7 @@ public class MainActivity extends AppCompatActivity {
         HashMap<String, UsbDevice> deviceList = manager.getDeviceList();
         stm32Device = deviceList.get("stm32Usb");
         if (stm32Device != null) {
-           showMsg( "vid=" + stm32Device.getVendorId() + "---pid=" + stm32Device.getProductId());
+            showMsg("vid=" + stm32Device.getVendorId() + "---pid=" + stm32Device.getProductId());
         }
         //获取设备接口
         // 一般来说一个设备都是一个接口，你可以通过getInterfaceCount()查看接口的个数
@@ -75,22 +84,21 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 if (stm32DeviceConnection.claimInterface(stm32Interface, true)) {
-                   showMsg( "设备已找到");
+                    showMsg("设备已找到");
                 } else {
                     stm32DeviceConnection.close();
                 }
             } else {
-               showMsg( "无权限");
+                showMsg("无权限");
             }
         } else {
-           showMsg( "未找到设备");
+            showMsg("未找到设备");
         }
         BroadcastReceiver usbReceiver = new BroadcastReceiver() {
             public void onReceive(Context context, Intent intent) {
                 String action = intent.getAction();
-
                 if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
-                    UsbDevice device = (UsbDevice)intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                    UsbDevice device = (UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
                     if (device != null) {
                         stm32DeviceConnection.releaseInterface(stm32Interface);
                         stm32DeviceConnection.close();
@@ -98,19 +106,20 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
-
+        sendPool.execute(usbRecevieThread);
     }
+
     private void sendToUsb(String content) {
         sendBytes = content.getBytes();
         int ret = -1;
         // 发送准备命令
         ret = stm32DeviceConnection.bulkTransfer(usbEpOut, sendBytes, sendBytes.length, 5000);
-       showMsg( "指令已经发送");
+        showMsg("指令已经发送");
     }
 
-    private void readFromUsb() {
+    private String readFromUsb() {
+        String  str=null;
         //读取数据2
-        int outMax = usbEpOut.getMaxPacketSize();
         int inMax = usbEpIn.getMaxPacketSize();
         ByteBuffer byteBuffer = ByteBuffer.allocate(inMax);
         UsbRequest usbRequest = new UsbRequest();
@@ -119,26 +128,30 @@ public class MainActivity extends AppCompatActivity {
         if (stm32DeviceConnection.requestWait() == usbRequest) {
             byte[] retData = byteBuffer.array();
             try {
-                String str=new String(retData, "UTF-8");
-               showMsg( "收到数据:"+str);
-             } catch (UnsupportedEncodingException e) {
+                 str = new String(retData, "UTF-8");
+                showMsg("收到数据:" + str);
+            } catch (UnsupportedEncodingException e) {
+                str=null;
                 e.printStackTrace();
             }
         }
+        return  str;
     }
-    public void showMsg(String msg){
+
+    public void showMsg(String msg) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
         Log.e("stm32Usb：-->>", msg);
     }
-    class ButtonClick implements View.OnClickListener {
 
+    class ButtonClick implements View.OnClickListener {
         @Override
         public void onClick(View view) {
             int id = view.getId();
             String temp = null;
             switch (id) {
                 case R.id.btn_send:
-                    sendToUsb("usb test data");
+                    usbSendThread.setMsg("usb data test");
+                    sendPool.execute(usbSendThread);
                     break;
                 default:
                     break;
@@ -148,6 +161,43 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    class UsbSendThread extends Thread {
+        private String c_v_msg;
+
+        public UsbSendThread() {
+        }
+
+        public void setMsg(String msg) {
+            c_v_msg = msg;
+        }
+
+        @Override
+        public void run() {
+            sendToUsb(c_v_msg);
+            c_v_msg="";
+        }
+    }
+    class UsbRecevieThread extends Thread {
+        private String c_v_msg;
+
+        public UsbRecevieThread() {
+        }
+
+        public String getMsg() {
+           return c_v_msg;
+        }
+
+        @Override
+        public void run() {
+            while (true) {
+                c_v_msg = null;
+                c_v_msg = readFromUsb();
+                if(c_v_msg!=null){
+                    textView.setText(c_v_msg);
+                }
+            }
+        }
+    }
 }
 
 
